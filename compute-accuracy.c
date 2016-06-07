@@ -20,13 +20,13 @@
 #include <string.h>
 
 const long long max_size = 2000;  // max length of strings
-const long long N = 1;            // number of closest words
+const long long N = 1;           // number of closest words
 const long long max_w = 50;       // max length of vocabulary entries
 
 int main(int argc, char **argv) {
   FILE *f;
   char st1[max_size], st2[max_size], st3[max_size], st4[max_size],
-      bestw[N][max_size], file_name[max_size], ch;
+      bestw[N][max_size], file_name[max_size];
   float dist, len, bestd[N], vec[max_size];
   long long words, size, a, b, c, d, b1, b2, b3, threshold = 0;
   float *M;
@@ -82,15 +82,13 @@ int main(int argc, char **argv) {
   fclose(f);
   TCN = 0;
   while (1) {
-    for (a = 0; a < N; a++) bestd[a] = 0;
-    for (a = 0; a < N; a++) bestw[a][0] = 0;
     scanf("%s", st1);
     for (a = 0; a < strlen(st1); a++) st1[a] = toupper(st1[a]);
     if ((!strcmp(st1, ":")) || (!strcmp(st1, "EXIT")) || feof(stdin)) {
       if (TCN == 0) TCN = 1;
       if (QID != 0) {
-        printf("ACCURACY TOP1: %.2f %%  (%d / %d)\n", CCN / (float)TCN * 100,
-               CCN, TCN);
+        printf("ACCURACY TOP%lld: %.2f %%  (%d / %d)\n", N,
+               CCN / (float)TCN * 100, CCN, TCN);
         printf(
             "Total accuracy: %.2f %%   Semantic accuracy: %.2f %%   Syntactic "
             "accuracy: %.2f %% \n",
@@ -121,7 +119,7 @@ int main(int argc, char **argv) {
     for (b = 0; b < words; b++)
       if (!strcmp(&vocab[b * max_w], st3)) break;
     b3 = b;
-    for (a = 0; a < N; a++) bestd[a] = 0;
+    for (a = 0; a < N; a++) bestd[a] = -1e-30;
     for (a = 0; a < N; a++) bestw[a][0] = 0;
     TQ++;
     if (b1 == words) continue;
@@ -151,14 +149,15 @@ int main(int argc, char **argv) {
         }
       }
     }
-    if (!strcmp(st4, bestw[0])) {
-      CCN++;
-      CACN++;
-      if (QID <= 5)
-        SEAC++;
-      else
-        SYAC++;
-    }
+    for (a = 0; a < N; a++)
+      if (!strcmp(st4, bestw[a])) {
+        CCN++;
+        CACN++;
+        if (QID <= 5)
+          SEAC++;
+        else
+          SYAC++;
+      }
     if (QID <= 5)
       SECN++;
     else

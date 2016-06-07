@@ -39,7 +39,7 @@ char train_file[MAX_STRING], output_file[MAX_STRING];
 char save_vocab_file[MAX_STRING], read_vocab_file[MAX_STRING];
 struct vocab_word *vocab;
 int binary = 0, cbow = 1, debug_mode = 2, window = 5, min_count = 5,
-    max_vocab = 1000000, num_threads = 12, min_reduce = 1;
+    num_threads = 12, min_reduce = 1;
 int *vocab_hash;
 long long vocab_max_size = 1000, vocab_size = 0, layer1_size = 100;
 long long train_words = 0, word_count_actual = 0, iter = 5, file_size = 0,
@@ -47,7 +47,6 @@ long long train_words = 0, word_count_actual = 0, iter = 5, file_size = 0,
 real alpha = 0.025, starting_alpha, sample = 1e-3;
 real *syn0, *syn1, *syn1neg, *expTable;
 clock_t start;
-int **peek_wids, *peek_wnum, peek_size, peek_topk, *peek_topw;
 
 int hs = 0, negative = 5;
 const int table_size = 1e8;
@@ -160,8 +159,7 @@ void SortVocab() {
   train_words = 0;
   for (a = 0; a < size; a++) {
     // Words occuring less than min_count times will be discarded from the vocab
-    // also discard not top words (max_vocab)
-    if ((vocab[a].cn < min_count || a >= max_vocab) && (a != 0)) {
+    if ((vocab[a].cn < min_count) && (a != 0)) {
       vocab_size--;
       free(vocab[a].word);
     } else {
@@ -390,119 +388,6 @@ void InitNet() {
   CreateBinaryTree();
 }
 
-void CheckModelNorm(real *syn0nm_ptr, real *syn1negnm_ptr) {
-  int a, b;
-  real syn0_nm = 0, syn1neg_nm = 0;
-  for (a = 0; a < vocab_size; a++)
-    for (b = 0; b < layer1_size; b++) {
-      syn0_nm += syn0[a * layer1_size + b] * syn0[a * layer1_size + b];
-      syn1neg_nm += syn1neg[a * layer1_size + b] * syn1neg[a * layer1_size + b];
-    }
-  syn0_nm = sqrt(syn0_nm);
-  syn1neg_nm = sqrt(syn1neg_nm);
-  *syn0nm_ptr = syn0_nm;
-  *syn1negnm_ptr = syn1neg_nm;
-  return;
-}
-
-void PeekLoad() {
-  int i, j, k;
-  char word[1000];
-  FILE *fin = fopen("/home/xwang95/data/gigaword/giga_nyt.pek.txt", "rb");
-  fscanf(fin, "%d ", &peek_topk);
-  peek_topw = (int *)malloc(peek_topk * sizeof(int));
-  for (i = 0; i < peek_topk; i++) {
-    fscanf(fin, "%s", word);
-    peek_topw[i] = SearchVocab(word);
-  }
-  fscanf(fin, "%d\n", &peek_size);
-  peek_wnum = (int *)malloc(peek_size * sizeof(int));
-  peek_wids = (int **)malloc(peek_size * sizeof(int *));
-  for (i = 0; i < peek_size; i++) {
-    fscanf(fin, "%d", peek_wnum + i);
-    peek_wids[i] = (int *)malloc(peek_wnum[i] * sizeof(int));
-    for (j = 0; j < peek_wnum[i]; j++) {
-      fscanf(fin, " %s", word);
-      peek_wids[i][j] = SearchVocab(word);
-    }
-  }
-  printf("Load %d Sentence, %d Target Word\n", peek_size, peek_topk);
-  j = 0;
-  for (i = 0; i < peek_topk; i++)
-    if (peek_topw[i] > 0)
-      peek_topw[j++] = peek_topw[i];
-    else
-      printf("*");
-  peek_topk = j;
-  for (i = 0; i < peek_size; i++) {
-    k = 0;
-    for (j = 0; j < peek_wnum[i]; j++) {
-      if (peek_wids[i][j] > 0)
-        peek_wids[i][k++] = peek_wids[i][j];
-      else
-        printf("*");
-    }
-    peek_wnum[i] = k;
-  }
-  printf("\n");
-  return;
-}
-
-int peek_lock = 0;
-real Peek() {
-  if (peek_lock) return -1;
-  peek_lock = 1;
-  int i, j, k, c, lt, rt, cw, pn;
-  real *neu1 = (real *)calloc(layer1_size, sizeof(real));
-  real *p = (real *)malloc(peek_topk * sizeof(real));
-  real s, total_p;
-  total_p = 0;
-  pn = 0;
-  for (i = 0; i < peek_size; i++) {
-    for (j = 0; j < peek_wnum[i]; j++) {
-      for (k = 0; k < peek_topk; k++)
-        if (peek_wids[i][j] == peek_topw[k]) break;
-      if (k == peek_topk) continue;
-      // compute scr
-      lt = j - window;
-      rt = j + window;
-      if (lt < 0) lt = 0;
-      if (rt >= peek_wnum[i]) rt = peek_wnum[i] - 1;
-      cw = 0;
-      for (c = 0; c < layer1_size; c++) neu1[c] = 0;
-      for (k = lt; k <= rt; k++) {
-        if (k != j) {
-          for (c = 0; c < layer1_size; c++)
-            neu1[c] += syn0[peek_wids[i][k] * layer1_size + c];
-          cw++;
-        }
-      }
-      for (c = 0; c < layer1_size; c++) neu1[c] /= cw;
-      // compute p
-      for (k = 0; k < peek_topk; k++) {
-        p[k] = 0;
-        for (c = 0; c < layer1_size; c++)
-          p[k] += neu1[c] * syn1neg[c + peek_topw[k] * layer1_size];
-        p[k] = exp(p[k]);
-      }
-      s = 0;
-      for (k = 0; k < peek_topk; k++) s += p[k];
-      for (k = 0; k < peek_topk; k++)
-        if (peek_topw[k] == peek_wids[i][j]) {
-          total_p += p[k] / s;
-          pn++;
-        }
-    }
-  }
-  real syn0nm, syn1negnm;
-  CheckModelNorm(&syn0nm, &syn1negnm);
-  printf("syn0: %.2e, syn1neg: %.2e ", syn0nm, syn1negnm);
-  printf("Peek: %.2e\n", total_p / pn);
-  peek_lock = 0;
-  return total_p / pn;
-}
-
-int peek_int = 0;
 void *TrainModelThread(void *id) {
   long long a, b, d, cw, word, last_word, sentence_length = 0,
                                           sentence_position = 0;
@@ -525,11 +410,6 @@ void *TrainModelThread(void *id) {
                alpha, word_count_actual / (real)(iter * train_words + 1) * 100,
                word_count_actual /
                    ((real)(now - start + 1) / (real)CLOCKS_PER_SEC * 1000));
-        peek_int++;
-        if (peek_int >= 10000) {
-          peek_int = 0;
-          Peek();
-        }
         fflush(stdout);
       }
       alpha = starting_alpha *
@@ -645,7 +525,7 @@ void *TrainModelThread(void *id) {
             last_word = sen[c];
             if (last_word == -1) continue;
             for (c = 0; c < layer1_size; c++)
-              syn0[c + last_word * layer1_size] += neu1e[c] / cw;
+              syn0[c + last_word * layer1_size] += neu1e[c];
           }
       }
     } else {  // train skip-gram
@@ -729,7 +609,7 @@ void *TrainModelThread(void *id) {
 
 void TrainModel() {
   long a, b, c, d;
-  FILE *fo, *fout;
+  FILE *fo;
   pthread_t *pt = (pthread_t *)malloc(num_threads * sizeof(pthread_t));
   printf("Starting training using file %s\n", train_file);
   starting_alpha = alpha;
@@ -741,47 +621,24 @@ void TrainModel() {
   if (output_file[0] == 0) return;
   InitNet();
   if (negative > 0) InitUnigramTable();
-  // Load Peek Set
-  PeekLoad();
   start = clock();
   for (a = 0; a < num_threads; a++)
     pthread_create(&pt[a], NULL, TrainModelThread, (void *)a);
   for (a = 0; a < num_threads; a++) pthread_join(pt[a], NULL);
   fo = fopen(output_file, "wb");
   if (classes == 0) {
-    char embd_file[200];
-    strcpy(embd_file, output_file);
-    strcat(embd_file, ".syn0");
-    fout = fopen(embd_file, "wb");
     // Save the word vectors
-    fprintf(fout, "%lld %lld\n", vocab_size, layer1_size);
+    fprintf(fo, "%lld %lld\n", vocab_size, layer1_size);
     for (a = 0; a < vocab_size; a++) {
-      fprintf(fout, "%s ", vocab[a].word);
+      fprintf(fo, "%s ", vocab[a].word);
       if (binary)
         for (b = 0; b < layer1_size; b++)
-          fwrite(&syn0[a * layer1_size + b], sizeof(real), 1, fout);
+          fwrite(&syn0[a * layer1_size + b], sizeof(real), 1, fo);
       else
         for (b = 0; b < layer1_size; b++)
-          fprintf(fout, "%lf ", syn0[a * layer1_size + b]);
-      fprintf(fout, "\n");
+          fprintf(fo, "%lf ", syn0[a * layer1_size + b]);
+      fprintf(fo, "\n");
     }
-    fclose(fout);
-    strcpy(embd_file, output_file);
-    strcat(embd_file, ".syn1neg");
-    fout = fopen(embd_file, "wb");
-    // Save the word vectors
-    fprintf(fout, "%lld %lld\n", vocab_size, layer1_size);
-    for (a = 0; a < vocab_size; a++) {
-      fprintf(fout, "%s ", vocab[a].word);
-      if (binary)
-        for (b = 0; b < layer1_size; b++)
-          fwrite(&syn1neg[a * layer1_size + b], sizeof(real), 1, fout);
-      else
-        for (b = 0; b < layer1_size; b++)
-          fprintf(fout, "%lf ", syn1neg[a * layer1_size + b]);
-      fprintf(fout, "\n");
-    }
-    fclose(fout);
   } else {
     // Run K-means on the word vectors
     int clcn = classes, iter = 10, closeid;
@@ -943,8 +800,6 @@ int main(int argc, char **argv) {
   if ((i = ArgPos((char *)"-iter", argc, argv)) > 0) iter = atoi(argv[i + 1]);
   if ((i = ArgPos((char *)"-min-count", argc, argv)) > 0)
     min_count = atoi(argv[i + 1]);
-  if ((i = ArgPos((char *)"-max-vocab", argc, argv)) > 0)
-    max_vocab = atoi(argv[i + 1]);
   if ((i = ArgPos((char *)"-classes", argc, argv)) > 0)
     classes = atoi(argv[i + 1]);
   vocab =

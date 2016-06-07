@@ -1,0 +1,15 @@
+## exclude by file type
+*.txt
+*.swp
+*.pyc
+*.zip
+*.tar.gz
+*.gz
+tags
+vectors.bin.*
+
+## exclude special cases
+[Tt]est/
+[Bb]in/
+[Tt]mp/
+[Dd]ebug/
