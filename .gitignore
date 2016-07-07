@@ -5,6 +5,8 @@
 *.zip
 *.tar.gz
 *.gz
+*.bin*
+*.vcb
 tags
 vectors.bin.*
 
