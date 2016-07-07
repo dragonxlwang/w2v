@@ -520,7 +520,7 @@ void *TrainModelThread(void *id) {
   FILE *fi = fopen(train_file, "rb");
   fseek(fi, file_size / (long long)num_threads * (long long)id, SEEK_SET);
   while (1) {
-    if (word_count - last_word_count > 1000000) {
+    if (word_count - last_word_count > 10000) {
       word_count_actual += word_count - last_word_count;
       last_word_count = word_count;
       if ((debug_mode > 1)) {
@@ -530,7 +530,7 @@ void *TrainModelThread(void *id) {
                word_count_actual /
                    ((real)(now - start + 1) / (real)CLOCKS_PER_SEC * 1000));
         peek_int++;
-        if (peek_int >= 10000) {
+        if (peek_int >= 500) {
           peek_int = 0;
           Peek();
         }
