@@ -3,6 +3,7 @@ make
 time ./word2vec \
   -train ~/data/gigaword/giga_nyt.txt \
   -output giga_vectors.bin \
+  -read-vocab giga_vectors.vcb \
   -cbow 1 \
   -size 100 \
   -window 5 \
