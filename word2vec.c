@@ -384,8 +384,10 @@ void InitNet() {
   for (a = 0; a < vocab_size; a++)
     for (b = 0; b < layer1_size; b++) {
       next_random = next_random * (unsigned long long)25214903917 + 11;
+      /* syn0[a * layer1_size + b] = */
+      /*     (((next_random & 0xFFFF) / (real)65536) - 0.5) / layer1_size; */
       syn0[a * layer1_size + b] =
-          (((next_random & 0xFFFF) / (real)65536) - 0.5) / layer1_size;
+          (((next_random & 0xFFFF) / (real)65536) - 0.5) * 2 * 1e-4;
     }
   CreateBinaryTree();
 }
@@ -453,53 +455,55 @@ real Peek() {
   if (peek_lock) return -1;
   peek_lock = 1;
   int i, j, k, c, lt, rt, cw, pn;
-  real *neu1 = (real *)calloc(layer1_size, sizeof(real));
-  real *p = (real *)malloc(peek_topk * sizeof(real));
-  real s, total_p;
-  total_p = 0;
-  pn = 0;
-  for (i = 0; i < peek_size; i++) {
-    for (j = 0; j < peek_wnum[i]; j++) {
-      for (k = 0; k < peek_topk; k++)
-        if (peek_wids[i][j] == peek_topw[k]) break;
-      if (k == peek_topk) continue;
-      // compute scr
-      lt = j - window;
-      rt = j + window;
-      if (lt < 0) lt = 0;
-      if (rt >= peek_wnum[i]) rt = peek_wnum[i] - 1;
-      cw = 0;
-      for (c = 0; c < layer1_size; c++) neu1[c] = 0;
-      for (k = lt; k <= rt; k++) {
-        if (k != j) {
-          for (c = 0; c < layer1_size; c++)
-            neu1[c] += syn0[peek_wids[i][k] * layer1_size + c];
-          cw++;
-        }
-      }
-      for (c = 0; c < layer1_size; c++) neu1[c] /= cw;
-      // compute p
-      for (k = 0; k < peek_topk; k++) {
-        p[k] = 0;
-        for (c = 0; c < layer1_size; c++)
-          p[k] += neu1[c] * syn1neg[c + peek_topw[k] * layer1_size];
-        p[k] = exp(p[k]);
-      }
-      s = 0;
-      for (k = 0; k < peek_topk; k++) s += p[k];
-      for (k = 0; k < peek_topk; k++)
-        if (peek_topw[k] == peek_wids[i][j]) {
-          total_p += p[k] / s;
-          pn++;
-        }
-    }
-  }
+  /* real *neu1 = (real *)calloc(layer1_size, sizeof(real)); */
+  /* real *p = (real *)malloc(peek_topk * sizeof(real)); */
+  /* real s, total_p; */
+  /* total_p = 0; */
+  /* pn = 0; */
+  /* for (i = 0; i < peek_size; i++) { */
+  /*   for (j = 0; j < peek_wnum[i]; j++) { */
+  /*     for (k = 0; k < peek_topk; k++) */
+  /*       if (peek_wids[i][j] == peek_topw[k]) break; */
+  /*     if (k == peek_topk) continue; */
+  /*     // compute scr */
+  /*     lt = j - window; */
+  /*     rt = j + window; */
+  /*     if (lt < 0) lt = 0; */
+  /*     if (rt >= peek_wnum[i]) rt = peek_wnum[i] - 1; */
+  /*     cw = 0; */
+  /*     for (c = 0; c < layer1_size; c++) neu1[c] = 0; */
+  /*     for (k = lt; k <= rt; k++) { */
+  /*       if (k != j) { */
+  /*         for (c = 0; c < layer1_size; c++) */
+  /*           neu1[c] += syn0[peek_wids[i][k] * layer1_size + c]; */
+  /*         cw++; */
+  /*       } */
+  /*     } */
+  /*     for (c = 0; c < layer1_size; c++) neu1[c] /= cw; */
+  /*     // compute p */
+  /*     for (k = 0; k < peek_topk; k++) { */
+  /*       p[k] = 0; */
+  /*       for (c = 0; c < layer1_size; c++) */
+  /*         p[k] += neu1[c] * syn1neg[c + peek_topw[k] * layer1_size]; */
+  /*       p[k] = exp(p[k]); */
+  /*     } */
+  /*     s = 0; */
+  /*     for (k = 0; k < peek_topk; k++) s += p[k]; */
+  /*     for (k = 0; k < peek_topk; k++) */
+  /*       if (peek_topw[k] == peek_wids[i][j]) { */
+  /*         total_p += p[k] / s; */
+  /*         pn++; */
+  /*       } */
+  /*   } */
+  /* } */
   real syn0nm, syn1negnm;
   CheckModelNorm(&syn0nm, &syn1negnm);
-  printf("syn0: %.2e, syn1neg: %.2e ", syn0nm, syn1negnm);
-  printf("Peek: %.2e\n", total_p / pn);
+  printf("syn0: %.2e, syn1neg: %.2e \n", syn0nm, syn1negnm);
+  /* printf("syn0: %.2e, syn1neg: %.2e ", syn0nm, syn1negnm); */
+  /* printf("Peek: %.2e\n", total_p / pn); */
   peek_lock = 0;
-  return total_p / pn;
+  /* return total_p / pn; */
+  return 0;
 }
 
 int peek_int = 0;
@@ -516,12 +520,12 @@ void *TrainModelThread(void *id) {
   FILE *fi = fopen(train_file, "rb");
   fseek(fi, file_size / (long long)num_threads * (long long)id, SEEK_SET);
   while (1) {
-    if (word_count - last_word_count > 10000) {
+    if (word_count - last_word_count > 1000000) {
       word_count_actual += word_count - last_word_count;
       last_word_count = word_count;
       if ((debug_mode > 1)) {
         now = clock();
-        printf("%cAlpha: %f  Progress: %.2f%%  Words/thread/sec: %.2fk  ", 13,
+        printf("%cAlpha: %f  Progress: %.4f%%  Words/thread/sec: %.2fk  ", 13,
                alpha, word_count_actual / (real)(iter * train_words + 1) * 100,
                word_count_actual /
                    ((real)(now - start + 1) / (real)CLOCKS_PER_SEC * 1000));
@@ -573,6 +577,7 @@ void *TrainModelThread(void *id) {
     for (c = 0; c < layer1_size; c++) neu1e[c] = 0;
     next_random = next_random * (unsigned long long)25214903917 + 11;
     b = next_random % window;
+    b = 0;
     if (cbow) {  // train the cbow architecture
       // in -> hidden
       cw = 0;
@@ -589,26 +594,28 @@ void *TrainModelThread(void *id) {
         }
       if (cw) {
         for (c = 0; c < layer1_size; c++) neu1[c] /= cw;
-        if (hs)
-          for (d = 0; d < vocab[word].codelen; d++) {
-            f = 0;
-            l2 = vocab[word].point[d] * layer1_size;
-            // Propagate hidden -> output
-            for (c = 0; c < layer1_size; c++) f += neu1[c] * syn1[c + l2];
-            if (f <= -MAX_EXP)
-              continue;
-            else if (f >= MAX_EXP)
-              continue;
-            else
-              f = expTable[(int)((f + MAX_EXP) *
-                                 (EXP_TABLE_SIZE / MAX_EXP / 2))];
-            // 'g' is the gradient multiplied by the learning rate
-            g = (1 - vocab[word].code[d] - f) * alpha;
-            // Propagate errors output -> hidden
-            for (c = 0; c < layer1_size; c++) neu1e[c] += g * syn1[c + l2];
-            // Learn weights hidden -> output
-            for (c = 0; c < layer1_size; c++) syn1[c + l2] += g * neu1[c];
-          }
+        /* if (hs) { */
+        /*   for (d = 0; d < vocab[word].codelen; d++) { */
+        /*     f = 0; */
+        /*     l2 = vocab[word].point[d] * layer1_size; */
+        /*     // Propagate hidden -> output */
+        /*     for (c = 0; c < layer1_size; c++) f += neu1[c] * syn1[c + l2]; */
+        /*     if (f <= -MAX_EXP) */
+        /*       continue; */
+        /*     else if (f >= MAX_EXP) */
+        /*       continue; */
+        /*     else */
+        /*       f = expTable[(int)((f + MAX_EXP) * */
+        /*                          (EXP_TABLE_SIZE / MAX_EXP / 2))]; */
+        /*     // 'g' is the gradient multiplied by the learning rate */
+        /*     g = (1 - vocab[word].code[d] - f) * alpha; */
+        /*     // Propagate errors output -> hidden */
+        /*     for (c = 0; c < layer1_size; c++) neu1e[c] += g * syn1[c + l2];
+         */
+        /*     // Learn weights hidden -> output */
+        /*     for (c = 0; c < layer1_size; c++) syn1[c + l2] += g * neu1[c]; */
+        /*   } */
+        /* } */
         // NEGATIVE SAMPLING
         if (negative > 0)
           for (d = 0; d < negative + 1; d++) {
@@ -648,73 +655,78 @@ void *TrainModelThread(void *id) {
               syn0[c + last_word * layer1_size] += neu1e[c] / cw;
           }
       }
-    } else {  // train skip-gram
-      for (a = b; a < window * 2 + 1 - b; a++)
-        if (a != window) {
-          c = sentence_position - window + a;
-          if (c < 0) continue;
-          if (c >= sentence_length) continue;
-          last_word = sen[c];
-          if (last_word == -1) continue;
-          l1 = last_word * layer1_size;
-          for (c = 0; c < layer1_size; c++) neu1e[c] = 0;
-          // HIERARCHICAL SOFTMAX
-          if (hs)
-            for (d = 0; d < vocab[word].codelen; d++) {
-              f = 0;
-              l2 = vocab[word].point[d] * layer1_size;
-              // Propagate hidden -> output
-              for (c = 0; c < layer1_size; c++)
-                f += syn0[c + l1] * syn1[c + l2];
-              if (f <= -MAX_EXP)
-                continue;
-              else if (f >= MAX_EXP)
-                continue;
-              else
-                f = expTable[(int)((f + MAX_EXP) *
-                                   (EXP_TABLE_SIZE / MAX_EXP / 2))];
-              // 'g' is the gradient multiplied by the learning rate
-              g = (1 - vocab[word].code[d] - f) * alpha;
-              // Propagate errors output -> hidden
-              for (c = 0; c < layer1_size; c++) neu1e[c] += g * syn1[c + l2];
-              // Learn weights hidden -> output
-              for (c = 0; c < layer1_size; c++)
-                syn1[c + l2] += g * syn0[c + l1];
-            }
-          // NEGATIVE SAMPLING
-          if (negative > 0)
-            for (d = 0; d < negative + 1; d++) {
-              if (d == 0) {
-                target = word;
-                label = 1;
-              } else {
-                next_random =
-                    next_random * (unsigned long long)25214903917 + 11;
-                target = table[(next_random >> 16) % table_size];
-                if (target == 0) target = next_random % (vocab_size - 1) + 1;
-                if (target == word) continue;
-                label = 0;
-              }
-              l2 = target * layer1_size;
-              f = 0;
-              for (c = 0; c < layer1_size; c++)
-                f += syn0[c + l1] * syn1neg[c + l2];
-              if (f > MAX_EXP)
-                g = (label - 1) * alpha;
-              else if (f < -MAX_EXP)
-                g = (label - 0) * alpha;
-              else
-                g = (label - expTable[(int)((f + MAX_EXP) *
-                                            (EXP_TABLE_SIZE / MAX_EXP / 2))]) *
-                    alpha;
-              for (c = 0; c < layer1_size; c++) neu1e[c] += g * syn1neg[c + l2];
-              for (c = 0; c < layer1_size; c++)
-                syn1neg[c + l2] += g * syn0[c + l1];
-            }
-          // Learn weights input -> hidden
-          for (c = 0; c < layer1_size; c++) syn0[c + l1] += neu1e[c];
-        }
     }
+    /* else {  // train skip-gram */
+    /*   for (a = b; a < window * 2 + 1 - b; a++) */
+    /*     if (a != window) { */
+    /*       c = sentence_position - window + a; */
+    /*       if (c < 0) continue; */
+    /*       if (c >= sentence_length) continue; */
+    /*       last_word = sen[c]; */
+    /*       if (last_word == -1) continue; */
+    /*       l1 = last_word * layer1_size; */
+    /*       for (c = 0; c < layer1_size; c++) neu1e[c] = 0; */
+    /*       // HIERARCHICAL SOFTMAX */
+    /*       if (hs) */
+    /*         for (d = 0; d < vocab[word].codelen; d++) { */
+    /*           f = 0; */
+    /*           l2 = vocab[word].point[d] * layer1_size; */
+    /*           // Propagate hidden -> output */
+    /*           for (c = 0; c < layer1_size; c++) */
+    /*             f += syn0[c + l1] * syn1[c + l2]; */
+    /*           if (f <= -MAX_EXP) */
+    /*             continue; */
+    /*           else if (f >= MAX_EXP) */
+    /*             continue; */
+    /*           else */
+    /*             f = expTable[(int)((f + MAX_EXP) * */
+    /*                                (EXP_TABLE_SIZE / MAX_EXP / 2))]; */
+    /*           // 'g' is the gradient multiplied by the learning rate */
+    /*           g = (1 - vocab[word].code[d] - f) * alpha; */
+    /*           // Propagate errors output -> hidden */
+    /*           for (c = 0; c < layer1_size; c++) neu1e[c] += g * syn1[c + l2];
+     */
+    /*           // Learn weights hidden -> output */
+    /*           for (c = 0; c < layer1_size; c++) */
+    /*             syn1[c + l2] += g * syn0[c + l1]; */
+    /*         } */
+    /*       // NEGATIVE SAMPLING */
+    /*       if (negative > 0) */
+    /*         for (d = 0; d < negative + 1; d++) { */
+    /*           if (d == 0) { */
+    /*             target = word; */
+    /*             label = 1; */
+    /*           } else { */
+    /*             next_random = */
+    /*                 next_random * (unsigned long long)25214903917 + 11; */
+    /*             target = table[(next_random >> 16) % table_size]; */
+    /*             if (target == 0) target = next_random % (vocab_size - 1) + 1;
+     */
+    /*             if (target == word) continue; */
+    /*             label = 0; */
+    /*           } */
+    /*           l2 = target * layer1_size; */
+    /*           f = 0; */
+    /*           for (c = 0; c < layer1_size; c++) */
+    /*             f += syn0[c + l1] * syn1neg[c + l2]; */
+    /*           if (f > MAX_EXP) */
+    /*             g = (label - 1) * alpha; */
+    /*           else if (f < -MAX_EXP) */
+    /*             g = (label - 0) * alpha; */
+    /*           else */
+    /*             g = (label - expTable[(int)((f + MAX_EXP) * */
+    /*                                         (EXP_TABLE_SIZE / MAX_EXP / 2))])
+     * * */
+    /*                 alpha; */
+    /*           for (c = 0; c < layer1_size; c++) neu1e[c] += g * syn1neg[c +
+     * l2]; */
+    /*           for (c = 0; c < layer1_size; c++) */
+    /*             syn1neg[c + l2] += g * syn0[c + l1]; */
+    /*         } */
+    /*       // Learn weights input -> hidden */
+    /*       for (c = 0; c < layer1_size; c++) syn0[c + l1] += neu1e[c]; */
+    /*     } */
+    /* } */
     sentence_position++;
     if (sentence_position >= sentence_length) {
       sentence_length = 0;
@@ -742,7 +754,10 @@ void TrainModel() {
   InitNet();
   if (negative > 0) InitUnigramTable();
   // Load Peek Set
-  PeekLoad();
+  /* PeekLoad(); */
+  real syn0nm, syn1negnm;
+  CheckModelNorm(&syn0nm, &syn1negnm);
+  printf("syn0: %.2e, syn1neg: %.2e \n\n\n", syn0nm, syn1negnm);
   start = clock();
   for (a = 0; a < num_threads; a++)
     pthread_create(&pt[a], NULL, TrainModelThread, (void *)a);
